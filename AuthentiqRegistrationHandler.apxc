@@ -26,11 +26,13 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
         
         if (data.attributeMap.containsKey('sfdc_networkid')) {
             //We have a community id, so create a user with community access
+            //TODO: explain what community access means
             //TODO: Maybe get salesforce community id scope in the Authentiq ID app?
             
             Account a;
             List < Account > accounts = [SELECT Id FROM account WHERE name =: social_account];
             if (accounts.isEmpty()) {
+                //TODO: throw new RegHandlerException() here as we should not create new users on the fly?
                 a = new Account(name = social_account);
                 insert(a);
             } else
@@ -49,6 +51,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             u.contactId = c.Id;
             return u;
         } else {
+            //TODO: explain when this else branch is reached, and how we should proceed.
             //TODO: Customize the profile
             Profile p = [SELECT Id FROM profile WHERE name =: standard_profile];
             u.profileId = p.Id;
@@ -71,23 +74,28 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             u.email = data.attributeMap.get('email');
             email = data.attributeMap.get('email');
         }
+        //TODO: Check for email_verified and bail out otherwise using RegHandlerException
         
         // Get first name
         if (data.attributeMap.containsKey('given_name')) {
-            u.firstName = data.attributeMap.get('given_name');
             givenName = data.attributeMap.get('given_name');
+            u.firstName = givenName;
         }
         
         // Get last name
         if (data.attributeMap.containsKey('family_name')) {
-            u.lastName = data.attributeMap.get('family_name');
             lastName = data.attributeMap.get('family_name');
+            u.lastName = lastName;
         }
         
-        // Create alias - must be 8 characters or less
+        // Create alias
         alias = givenName + lastName;
+        // must be 8 characters or less
         if (alias.length() > 8) {
             u.alias = alias.toLowerCase().substring(0, 8);
+        }
+        else {
+            u.alias = alias.toLowerCase();
         }
         
         // If there is no user id yet means we have a new user so,
@@ -97,6 +105,8 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             u.username = getPreferredUsername(data.attributeMap.get('preferred_username'));
         } else if (u.id == null) {
             u.username  = getGeneratedUsername(data.attributeMap.get('email'), alias);
+        } else {
+            //TODO: what now, not setting u.username??
         }
         
         // Get phone
@@ -151,6 +161,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
         } else {
             Integer rand = Math.round(Math.random() * 100000000);
             return preferredUsername + '.' + rand;
+            //TODO: better a for loop to get the first available N for preferredUsername_N. Btw: are . in name ok?
         }
     }
     
@@ -162,6 +173,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
         } else {
             Integer rand = Math.round(Math.random() * 100000000);
             return alias + '.' + rand + '@' + email.substringAfter('@');
+            //TODO: loop to find first available here too?
         }
     }
     
@@ -182,6 +194,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     // Then add these to a Map<String, String> by splitting each value at the first and the last '=' and trimming.
     private Map<String, String> parseMalformedNestedJSON(String value) {
         String[] arrayOfValues = value.substring(value.indexOf('{') + 1, value.indexOf('}') - 1).split(',');
+        //TODO: Q: wouldnt this fail if there are commas in the values?
         Map<String, String> fields = new Map<String, String>();
         for(String item : arrayOfValues){
             String k = item.substringBefore('=').trim();
