@@ -1,7 +1,7 @@
 /*
-* Authentiq registration handler for Salesforce
-* Check the wiki on https://github.com/AuthentiqID/authentiq-saleforce-registration-handler/
-* to find out how to set up your SaleForce domain to use Authentiq.
+* Authentiq registration handler for Salesforce.com
+* Check the Wiki on https://github.com/AuthentiqID/authentiq-saleforce-registration-handler/
+* on how to set up your Salesforce domain for use with Authentiq.
 * Get your credentials at https://authentiq.com/developers
 * Copyright Authentiq 2017
 */
@@ -33,8 +33,9 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             if (accounts.isEmpty()) {
                 a = new Account(name = social_account);
                 insert(a);
-            } else
+            } else {
                 a = accounts[0];
+            }
             
             Contact c = new Contact();
             c.accountId = a.Id;
@@ -100,8 +101,8 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
         }
         
         // Get phone
-        if(data.attributeMap.containsKey('phone_number')) {
-            if(data.attributeMap.get('phone_type') == 'mobile') {
+        if (data.attributeMap.containsKey('phone_number')) {
+            if (data.attributeMap.get('phone_type') == 'mobile') {
                 u.mobilePhone = data.attributeMap.get('phone_number');
             } else {
                 u.phone = data.attributeMap.get('phone_number');
@@ -157,7 +158,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     // Assign the email to username or
     // generate one based on the alias
     private String getGeneratedUsername(String email, String alias){
-        if(availableUsername(email)){
+        if (availableUsername(email)) {
             return email;
         } else {
             Integer rand = Math.round(Math.random() * 100000000);
@@ -168,11 +169,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     // Check if the username we asked for is available
     private boolean availableUsername(String availableUsername) {
         List<User> users = [select Id from User where username =:availableUsername];
-        if(users.size()==1) // one user has already that user name
-        {
-            return false;
-        }
-        return true;
+        return (users.size()==0); // true if no user has already that user name
     }
     
     // Salesforce does not play well with nested jsons.
@@ -183,7 +180,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     private Map<String, String> parseMalformedNestedJSON(String value) {
         String[] arrayOfValues = value.substring(value.indexOf('{') + 1, value.indexOf('}') - 1).split(',');
         Map<String, String> fields = new Map<String, String>();
-        for(String item : arrayOfValues){
+        for (String item : arrayOfValues) {
             String k = item.substringBefore('=').trim();
             String v = item.substringAfterLast('=').trim();
             fields.put(k, v);
