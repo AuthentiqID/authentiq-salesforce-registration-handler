@@ -1,33 +1,33 @@
 /*
 * Authentiq registration handler for Salesforce
-* Check here [blog post url / wiki url] to find out how to
-* set up your SaleForce domain to use Authentiq.
+* Check the wiki on https://github.com/AuthentiqID/authentiq-saleforce-registration-handler/
+* to find out how to set up your SaleForce domain to use Authentiq.
 * Get your credentials at https://authentiq.com/developers
 * Copyright Authentiq 2017
 */
 
 global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
-
+    
     static final string social_account = 'Social Sign-On';
     static final string community_profile = 'Customer Community User';
     static final string standard_profile = 'Standard User';
-
+    
     class RegHandlerException extends Exception {}
-
+    
     // Creates a Standard salesforce or a community user
     global User createUser(Id portalId, Auth.UserData data) {
         if(!canCreateUser(data)){
             throw new RegHandlerException('Can\'t create a user. Last name and/or email is missing from the information provided.');
         }
-
+        
         User u = new User();
-
+        
         prepareUserData(data, u);
-
+        
         if (data.attributeMap.containsKey('sfdc_networkid')) {
             //We have a community id, so create a user with community access
             //TODO: Maybe get salesforce community id scope in the Authentiq ID app?
-
+            
             Account a;
             List < Account > accounts = [SELECT Id FROM account WHERE name =: social_account];
             if (accounts.isEmpty()) {
@@ -35,14 +35,14 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
                 insert(a);
             } else
                 a = accounts[0];
-
+            
             Contact c = new Contact();
             c.accountId = a.Id;
-
+            
             c.firstName = u.firstName;
             c.lastName = u.lastName;
             insert(c);
-
+            
             //TODO: Customize the profile
             Profile p = [SELECT Id FROM profile WHERE name =: community_profile];
             u.profileId = p.Id;
@@ -55,48 +55,50 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             return u;
         }
     }
-
+    
     // Update the user (this is called by salesforce if the user exists)
     global void updateUser(Id userId, Id portalId, Auth.UserData data) {
-        User u = new User(id = userId);
+        User u = new User(id = userId);              
         prepareUserData(data, u);
         update(u);
     }
-
+    
     private void prepareUserData(Auth.UserData data, User u) {
         String givenName, lastName, email, alias;
-
+        
         // Get email
         if (data.attributeMap.containsKey('email')){
             u.email = data.attributeMap.get('email');
             email = data.attributeMap.get('email');
         }
-
+        
         // Get first name
         if (data.attributeMap.containsKey('given_name')) {
             u.firstName = data.attributeMap.get('given_name');
             givenName = data.attributeMap.get('given_name');
         }
-
+        
         // Get last name
         if (data.attributeMap.containsKey('family_name')) {
             u.lastName = data.attributeMap.get('family_name');
             lastName = data.attributeMap.get('family_name');
         }
-
+        
         // Create alias - must be 8 characters or less
         alias = givenName + lastName;
         if (alias.length() > 8) {
-            u.alias = alias.substring(0, 8);
+            u.alias = alias.toLowerCase().substring(0, 8);
         }
-
-        // Get or generate the username depending on whether it exists or not
-        if (data.attributeMap.containsKey('preferred_username')){
+        
+        // If there is no user id yet means we have a new user so,
+        // get or generate the username depending on whether it exists or not
+        // otherwise skip
+        if (u.id == null && data.attributeMap.containsKey('preferred_username')){
             u.username = getPreferredUsername(data.attributeMap.get('preferred_username'));
-        } else {
+        } else if (u.id == null) {
             u.username  = getGeneratedUsername(data.attributeMap.get('email'), alias);
         }
-
+        
         // Get phone
         if(data.attributeMap.containsKey('phone_number')) {
             if(data.attributeMap.get('phone_type') == 'mobile') {
@@ -105,7 +107,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
                 u.phone = data.attributeMap.get('phone_number');
             }
         }
-
+        
         // Get address
         if (data.attributeMap.containsKey('address')) {
             Map<String, String> addressFields = parseMalformedNestedJSON(data.attributeMap.get('address'));
@@ -115,7 +117,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             u.country =  addressFields.get('country');
             u.postalCode = addressFields.get('postal_code');
         }
-
+        
         // Get locale
         if (data.attributeMap.containsKey('locale')) {
             u.localeSidKey = data.attributeMap.get('locale');
@@ -124,23 +126,23 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             u.localeSidKey = UserInfo.getLocale();
             u.languageLocaleKey = UserInfo.getLocale();
         }
-
+        
         // Get zoneinfo
         if (data.attributeMap.containsKey('zoneinfo')) {
             u.timeZoneSidKey = data.attributeMap.get('zoneinfo');
         }
-
+        
         // Set email encoding key to 'UTF-8'
         u.emailEncodingKey = 'UTF-8';
     }
-
+    
     // Decide if we can create a user from the data provided
     private boolean canCreateUser(Auth.UserData data) {
         return (data != null
                 && data.attributeMap.containsKey('email')
                 && data.attributeMap.containsKey('family_name'));
     }
-
+    
     // Assign the preferred username to username or
     // generate one based on the preferred username
     private String getPreferredUsername(String preferredUsername){
@@ -151,7 +153,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             return preferredUsername + '.' + rand;
         }
     }
-
+    
     // Assign the email to username or
     // generate one based on the alias
     private String getGeneratedUsername(String email, String alias){
@@ -162,7 +164,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             return alias + '.' + rand + '@' + email.substringAfter('@');
         }
     }
-
+    
     // Check if the username we asked for is available
     private boolean availableUsername(String availableUsername) {
         List<User> users = [select Id from User where username =:availableUsername];
@@ -172,7 +174,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
         }
         return true;
     }
-
+    
     // Salesforce does not play well with nested jsons.
     // Instead of getting a JSON (e.g. for address) we get something like the following
     // {country=country, street_address=address, formatted=address\nlocality..., locality=locality, state=state, postalcode=postalcode}.
