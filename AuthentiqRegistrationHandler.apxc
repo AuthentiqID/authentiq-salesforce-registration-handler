@@ -1,123 +1,145 @@
 /*
-* Authentiq registration handler for Salesforce
-* Check the wiki on https://github.com/AuthentiqID/authentiq-saleforce-registration-handler/
-* to find out how to set up your SaleForce domain to use Authentiq.
+* Authentiq registration handler for Salesforce.com
+* Check the Wiki on https://github.com/AuthentiqID/authentiq-saleforce-registration-handler/
+* on how to set up your Salesforce domain for use with Authentiq.
 * Get your credentials at https://authentiq.com/developers
 * Copyright Authentiq 2017
 */
 
 global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
-    
+
     static final string social_account = 'Social Sign-On';
     static final string community_profile = 'Customer Community User';
     static final string standard_profile = 'Standard User';
-    
+    static final boolean canCreateNewUsers = false;
+
     class RegHandlerException extends Exception {}
-    
-    // Creates a Standard salesforce or a community user
+
+    // Creates a Standard salesforce or a community user or links the account
+    // In the case the user exists either by email
+    // or is already linked but on another browser / computer
     global User createUser(Id portalId, Auth.UserData data) {
-        if(!canCreateUser(data)){
-            throw new RegHandlerException('Can\'t create a user. Last name and/or email is missing from the information provided.');
+        if (!canCreateUser(data)){
+            throw new RegHandlerException('Can\'t create a user. Last email is missing or not verified.');
         }
-        
-        User u = new User();
-        
+
+        User u;
+
+        List<User> userList = listOfUsers(data);
+
+        // If the account exists just return the existing user
+        // otherwise we create a new user or fail with a nice message
+        if (userList.size() > 0){
+            String userId = userList.get(0).id;
+            u = new User(id = userId);
+            prepareUserData(data, u);
+            return u;
+        } else if (canCreateNewUsers) {
+            return createNewUser(u, portalId, data);
+        } else {
+            throw new RegHandlerException('Can\'t create a user. User not found or new user creation is not allowed');
+            // need to return something
+            return null;
+        }
+    }
+
+    // Update the user
+    // This is called by salesforce if the user exists
+    global void updateUser(Id userId, Id portalId, Auth.UserData data) {
+        User u = new User(id = userId);
         prepareUserData(data, u);
-        
+        update(u);
+    }
+
+    private User createNewUser(User u, Id portalId, Auth.UserData data){
         if (data.attributeMap.containsKey('sfdc_networkid')) {
-            //We have a community id, so create a user with community access
-            //TODO: explain what community access means
-            //TODO: Maybe get salesforce community id scope in the Authentiq ID app?
-            
+            // We have a community id, so create a user with community access
+            // Communities are spaces for employees, customers and partners to
+            // collaborate on best practices and business processes.
+
+            // For a community user, we also need an account
             Account a;
             List < Account > accounts = [SELECT Id FROM account WHERE name =: social_account];
             if (accounts.isEmpty()) {
-                //TODO: throw new RegHandlerException() here as we should not create new users on the fly?
                 a = new Account(name = social_account);
                 insert(a);
-            } else
+            } else {
                 a = accounts[0];
-            
+            }
+
+            // For a community user, we also need an contact
             Contact c = new Contact();
             c.accountId = a.Id;
-            
+
             c.firstName = u.firstName;
             c.lastName = u.lastName;
             insert(c);
-            
-            //TODO: Customize the profile
+
+            // Lastly are creating a new user alongside the community profile.
             Profile p = [SELECT Id FROM profile WHERE name =: community_profile];
             u.profileId = p.Id;
             u.contactId = c.Id;
             return u;
         } else {
-            //TODO: explain when this else branch is reached, and how we should proceed.
-            //TODO: Customize the profile
+            // Just creating a new user.
+            // We select the standard profile here to give access rights to the user
             Profile p = [SELECT Id FROM profile WHERE name =: standard_profile];
             u.profileId = p.Id;
             return u;
         }
     }
-    
-    // Update the user (this is called by salesforce if the user exists)
-    global void updateUser(Id userId, Id portalId, Auth.UserData data) {
-        User u = new User(id = userId);              
-        prepareUserData(data, u);
-        update(u);
-    }
-    
+
     private void prepareUserData(Auth.UserData data, User u) {
         String givenName, lastName, email, alias;
-        
+
         // Get email
         if (data.attributeMap.containsKey('email')){
             u.email = data.attributeMap.get('email');
             email = data.attributeMap.get('email');
         }
-        //TODO: Check for email_verified and bail out otherwise using RegHandlerException
-        
+
+        // TODO: Check for email_verified and bail out otherwise using RegHandlerException
+        // Already checking for email_verified in canCreateUser(Auth.UserData data).
+        // If already a user and calling update is there a need to stop the login?
+
         // Get first name
         if (data.attributeMap.containsKey('given_name')) {
+            u.firstName = data.attributeMap.get('given_name');
             givenName = data.attributeMap.get('given_name');
-            u.firstName = givenName;
         }
-        
+
         // Get last name
         if (data.attributeMap.containsKey('family_name')) {
+            u.lastName = data.attributeMap.get('family_name');
             lastName = data.attributeMap.get('family_name');
-            u.lastName = lastName;
         }
-        
-        // Create alias
-        alias = givenName + lastName;
-        // must be 8 characters or less
+
+        // Create alias - must be 8 characters or less
+        // First names are more common than last names so, use lastname first
+        // to avoid multiple aliases starting from the same chars.
+        alias = lastName + givenName;
         if (alias.length() > 8) {
             u.alias = alias.toLowerCase().substring(0, 8);
         }
-        else {
-            u.alias = alias.toLowerCase();
-        }
-        
+
         // If there is no user id yet means we have a new user so,
         // get or generate the username depending on whether it exists or not
-        // otherwise skip
+        // If there is a user id, then we definitely have a username and we must not change it.
         if (u.id == null && data.attributeMap.containsKey('preferred_username')){
             u.username = getPreferredUsername(data.attributeMap.get('preferred_username'));
         } else if (u.id == null) {
             u.username  = getGeneratedUsername(data.attributeMap.get('email'), alias);
-        } else {
-            //TODO: what now, not setting u.username??
         }
-        
+
         // Get phone
-        if(data.attributeMap.containsKey('phone_number')) {
-            if(data.attributeMap.get('phone_type') == 'mobile') {
+        if (data.attributeMap.containsKey('phone_number')) {
+            if (data.attributeMap.get('phone_type') == 'mobile') {
                 u.mobilePhone = data.attributeMap.get('phone_number');
             } else {
                 u.phone = data.attributeMap.get('phone_number');
             }
         }
-        
+
         // Get address
         if (data.attributeMap.containsKey('address')) {
             Map<String, String> addressFields = parseMalformedNestedJSON(data.attributeMap.get('address'));
@@ -127,7 +149,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             u.country =  addressFields.get('country');
             u.postalCode = addressFields.get('postal_code');
         }
-        
+
         // Get locale
         if (data.attributeMap.containsKey('locale')) {
             u.localeSidKey = data.attributeMap.get('locale');
@@ -136,71 +158,103 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             u.localeSidKey = UserInfo.getLocale();
             u.languageLocaleKey = UserInfo.getLocale();
         }
-        
+
         // Get zoneinfo
         if (data.attributeMap.containsKey('zoneinfo')) {
             u.timeZoneSidKey = data.attributeMap.get('zoneinfo');
         }
-        
+
         // Set email encoding key to 'UTF-8'
         u.emailEncodingKey = 'UTF-8';
     }
-    
+
     // Decide if we can create a user from the data provided
     private boolean canCreateUser(Auth.UserData data) {
         return (data != null
                 && data.attributeMap.containsKey('email')
-                && data.attributeMap.containsKey('family_name'));
+                && data.attributeMap.containsKey('family_name')
+                && data.attributeMap.containsKey('email_verified')
+                && data.attributeMap.get('email_verified') == 'true');
     }
-    
+
     // Assign the preferred username to username or
     // generate one based on the preferred username
     private String getPreferredUsername(String preferredUsername){
-        if(availableUsername(preferredUsername)) {
+        if (availableUsername(preferredUsername)) {
             return preferredUsername;
         } else {
             Integer rand = Math.round(Math.random() * 100000000);
+
+            // Loop through rand if still not available
+            while(!availableUsername(preferredUsername + '.' + rand)){
+                rand ++;
+            }
+
             return preferredUsername + '.' + rand;
-            //TODO: better a for loop to get the first available N for preferredUsername_N. Btw: are . in name ok?
         }
     }
-    
+
     // Assign the email to username or
     // generate one based on the alias
     private String getGeneratedUsername(String email, String alias){
-        if(availableUsername(email)){
+        if (availableUsername(email)) {
             return email;
         } else {
             Integer rand = Math.round(Math.random() * 100000000);
+
+            // Loop through username if still not available
+            while(!availableUsername(alias + '.' + rand + '@' + email.substringAfter('@'))){
+                rand ++;
+            }
+
             return alias + '.' + rand + '@' + email.substringAfter('@');
-            //TODO: loop to find first available here too?
         }
     }
-    
+
     // Check if the username we asked for is available
     private boolean availableUsername(String availableUsername) {
         List<User> users = [select Id from User where username =:availableUsername];
-        if(users.size()==1) // one user has already that user name
-        {
-            return false;
-        }
-        return true;
+        return (users.size()==0); // true if no user has already that user name
     }
-    
+
     // Salesforce does not play well with nested jsons.
     // Instead of getting a JSON (e.g. for address) we get something like the following
     // {country=country, street_address=address, formatted=address\nlocality..., locality=locality, state=state, postalcode=postalcode}.
     // So, get the string inside the curly brackets and split by comma to get the array of values.
     // Then add these to a Map<String, String> by splitting each value at the first and the last '=' and trimming.
+    // This is not perfectly safe as the user may pass commas and equal signs in the values.
+    // It does not break things completely but also does not guarantee consistensy on values that contain these characters.
     private Map<String, String> parseMalformedNestedJSON(String value) {
         String[] arrayOfValues = value.substring(value.indexOf('{') + 1, value.indexOf('}') - 1).split(',');
         //TODO: Q: wouldnt this fail if there are commas in the values?
         Map<String, String> fields = new Map<String, String>();
-        for(String item : arrayOfValues){
+        for (String item : arrayOfValues) {
             String k = item.substringBefore('=').trim();
             String v = item.substringAfterLast('=').trim();
             fields.put(k, v);
         }
         return fields;
+    }
+
+    private List<User> listOfUsers(Auth.UserData data) {
+        List<ThirdPartyAccountLink> accountsList = [SELECT userid, remoteidentifier FROM ThirdPartyAccountLink where RemoteIdentifier =: data.identifier];
+        // Normally we should get only one entry on the list above, so check for the first userid
+        // Else check for the account by email and for being active (could we check for more?)
+        // We probably can be very specific with the remote identifier
+        // If that fails then get the user by email, which in and organization probably is unique
+        List<User> userList;
+        if (accountsList.size() > 0) {
+            userList = [SELECT id
+                        FROM User
+                        WHERE id =: accountsList.get(0).userId
+                        AND email =: data.email
+                        AND isActive = true];
+        } else {
+            userList = [SELECT id
+                        FROM User
+                        WHERE email =: data.email
+                        AND isActive = true];
+        }
+        return userList;
     }
 }
