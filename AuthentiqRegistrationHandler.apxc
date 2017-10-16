@@ -20,7 +20,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     // or is already linked but on another browser / computer
     global User createUser(Id portalId, Auth.UserData data) {
         if (!canCreateUser(data)){
-            throw new RegHandlerException('Can\'t create a user. Last email is missing or not verified.');
+            throw new RegHandlerException('Can\'t create a user. Last name or email is missing, or email is not verified.');
         }
 
         User u;
