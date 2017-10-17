@@ -11,13 +11,15 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     static final string social_account = 'Social Sign-On';
     static final string community_profile = 'Customer Community User';
     static final string standard_profile = 'Standard User';
-    static final boolean canCreateNewUsers = false;
+
+    // Allow the code to create new users or not.
+    static final boolean allowNewUserCreation = false;
 
     class RegHandlerException extends Exception {}
 
-    // Creates a Standard salesforce or a community user or links the account
-    // In the case the user exists either by email
-    // or is already linked but on another browser / computer
+    // Creates a Standard salesforce or a community user
+    // Or links the account in the case the user exists either by email
+    // Or is already linked but on another browser / computer
     global User createUser(Id portalId, Auth.UserData data) {
         if (!canCreateUser(data)){
             throw new RegHandlerException('Can\'t create a user. Last name or email is missing, or email is not verified.');
@@ -25,7 +27,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
 
         User u;
 
-        List<User> userList = listOfUsers(data);
+        List<User> userList = getMatchingUser(data);
 
         // If the account exists just return the existing user
         // otherwise we create a new user or fail with a nice message
@@ -34,7 +36,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             u = new User(id = userId);
             prepareUserData(data, u);
             return u;
-        } else if (canCreateNewUsers) {
+        } else if (allowNewUserCreation) {
             return createNewUser(u, portalId, data);
         } else {
             throw new RegHandlerException('Can\'t create a user. User not found or new user creation is not allowed');
@@ -94,8 +96,8 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
 
         // Get email
         if (data.attributeMap.containsKey('email')){
-            u.email = data.attributeMap.get('email');
             email = data.attributeMap.get('email');
+            u.email = email;
         }
 
         // TODO: Check for email_verified and bail out otherwise using RegHandlerException
@@ -104,14 +106,14 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
 
         // Get first name
         if (data.attributeMap.containsKey('given_name')) {
-            u.firstName = data.attributeMap.get('given_name');
             givenName = data.attributeMap.get('given_name');
+            u.firstName = givenName;
         }
 
         // Get last name
         if (data.attributeMap.containsKey('family_name')) {
-            u.lastName = data.attributeMap.get('family_name');
             lastName = data.attributeMap.get('family_name');
+            u.lastName = lastName;
         }
 
         // Create alias - must be 8 characters or less
@@ -123,20 +125,30 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
         }
 
         // If there is no user id yet means we have a new user so,
-        // get or generate the username depending on whether it exists or not
+        // set the email as the new users username;
         // If there is a user id, then we definitely have a username and we must not change it.
-        if (u.id == null && data.attributeMap.containsKey('preferred_username')){
-            u.username = getPreferredUsername(data.attributeMap.get('preferred_username'));
-        } else if (u.id == null) {
-            u.username  = getGeneratedUsername(data.attributeMap.get('email'), alias);
+
+        if (u.id == null) {
+            if (availableUsername(email)) {
+                u.username  = email;
+            } else {
+          		throw new RegHandlerException('Can\'t create a user. There is already an account with this username.');
+            }
         }
 
-        // Get phone
+        // Get phoneNumber
+        // If non existing then it will return null.
+        String phoneNumber = data.attributeMap.get('phone_number');
+
+        // Set then phone number attribute based on phone type.
+        // Because we don't know how null values are handled we first check for
+        // the phone_number key existence and then set the correct attribute to the user.
+        // If it does not exist, just skip it.
         if (data.attributeMap.containsKey('phone_number')) {
             if (data.attributeMap.get('phone_type') == 'mobile') {
-                u.mobilePhone = data.attributeMap.get('phone_number');
+                u.mobilePhone = phoneNumber;
             } else {
-                u.phone = data.attributeMap.get('phone_number');
+                u.phone = phoneNumber;
             }
         }
 
@@ -177,44 +189,41 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
                 && data.attributeMap.get('email_verified') == 'true');
     }
 
-    // Assign the preferred username to username or
-    // generate one based on the preferred username
-    private String getPreferredUsername(String preferredUsername){
-        if (availableUsername(preferredUsername)) {
-            return preferredUsername;
-        } else {
-            Integer rand = Math.round(Math.random() * 100000000);
-
-            // Loop through rand if still not available
-            while(!availableUsername(preferredUsername + '.' + rand)){
-                rand ++;
-            }
-
-            return preferredUsername + '.' + rand;
-        }
-    }
-
-    // Assign the email to username or
-    // generate one based on the alias
-    private String getGeneratedUsername(String email, String alias){
-        if (availableUsername(email)) {
-            return email;
-        } else {
-            Integer rand = Math.round(Math.random() * 100000000);
-
-            // Loop through username if still not available
-            while(!availableUsername(alias + '.' + rand + '@' + email.substringAfter('@'))){
-                rand ++;
-            }
-
-            return alias + '.' + rand + '@' + email.substringAfter('@');
-        }
-    }
-
     // Check if the username we asked for is available
     private boolean availableUsername(String availableUsername) {
         List<User> users = [select Id from User where username =:availableUsername];
         return (users.size()==0); // true if no user has already that user name
+    }
+
+
+    // Try to get at least one matching, existing and active user for account the linking case
+    // or for the usage in a new computer / new browser. In the second case, this should trigger a verification email or sms to the user.
+    private List<User> getMatchingUser(Auth.UserData data) {
+        List<ThirdPartyAccountLink> matchedAccounts = [SELECT userid, remoteidentifier FROM ThirdPartyAccountLink where RemoteIdentifier =: data.identifier];
+
+        // Normally we should get only one entry in the accountsList.
+
+        List<User> userList;
+
+        // If there is indeed one or more accounts found then we have a linked account already, so check for the first userid and the email,
+        // and return the matching user of the first account.
+
+        // Else we have an account linking case, where we need to find a matching user by the data provided by Authentiq.
+        // Check for the account by email (which in an organization probably is usually unique) and for being active (could we check for more?)
+
+        if (matchedAccounts.size() > 0) {
+            userList = [SELECT id
+                        FROM User
+                        WHERE id =: matchedAccounts.get(0).userId
+                        AND email =: data.email
+                        AND isActive = true];
+        } else {
+            userList = [SELECT id
+                        FROM User
+                        WHERE email =: data.email
+                        AND isActive = true];
+        }
+        return userList;
     }
 
     // Salesforce does not play well with nested jsons.
@@ -223,7 +232,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     // So, get the string inside the curly brackets and split by comma to get the array of values.
     // Then add these to a Map<String, String> by splitting each value at the first and the last '=' and trimming.
     // This is not perfectly safe as the user may pass commas and equal signs in the values.
-    // It does not break things completely but also does not guarantee consistensy on values that contain these characters.
+    // It does not break things completely but also does not guarantee consistency on values that contain these characters.
     private Map<String, String> parseMalformedNestedJSON(String value) {
         String[] arrayOfValues = value.substring(value.indexOf('{') + 1, value.indexOf('}') - 1).split(',');
         //TODO: Q: wouldnt this fail if there are commas in the values?
@@ -234,27 +243,5 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             fields.put(k, v);
         }
         return fields;
-    }
-
-    private List<User> listOfUsers(Auth.UserData data) {
-        List<ThirdPartyAccountLink> accountsList = [SELECT userid, remoteidentifier FROM ThirdPartyAccountLink where RemoteIdentifier =: data.identifier];
-        // Normally we should get only one entry on the list above, so check for the first userid
-        // Else check for the account by email and for being active (could we check for more?)
-        // We probably can be very specific with the remote identifier
-        // If that fails then get the user by email, which in and organization probably is unique
-        List<User> userList;
-        if (accountsList.size() > 0) {
-            userList = [SELECT id
-                        FROM User
-                        WHERE id =: accountsList.get(0).userId
-                        AND email =: data.email
-                        AND isActive = true];
-        } else {
-            userList = [SELECT id
-                        FROM User
-                        WHERE email =: data.email
-                        AND isActive = true];
-        }
-        return userList;
     }
 }
