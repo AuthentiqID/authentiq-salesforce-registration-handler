@@ -22,7 +22,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     // Or is already linked but on another browser / computer
     global User createUser(Id portalId, Auth.UserData data) {
         if (!canCreateUser(data)){
-            throw new RegHandlerException('Can\'t create a user. Last name or email is missing, or email is not verified.');
+            throw new RegHandlerException('Can\'t create a new user or link an existing user to Authentiq ID because last name or email is missing, or email is not verified.');
         }
 
         User u;
@@ -39,7 +39,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
         } else if (allowNewUserCreation) {
             return createNewUser(u, portalId, data);
         } else {
-            throw new RegHandlerException('Can\'t create a user. User not found or new user creation is not allowed');
+            throw new RegHandlerException('Can\'t create a new user or link an existing user to Authentiq ID either because it is not allowed or the user was not found.');
             // need to return something
             return null;
         }
@@ -48,9 +48,14 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     // Update the user
     // This is called by salesforce if the user exists
     global void updateUser(Id userId, Id portalId, Auth.UserData data) {
-        User u = new User(id = userId);
-        prepareUserData(data, u);
-        update(u);
+
+        if (!canUpdateUser(data)){
+            throw new RegHandlerException('Can\'t update the existing user because the email that was used is not verified');
+        } else {
+            User u = new User(id = userId);
+            prepareUserData(data, u);
+            update(u);
+        }
     }
 
     private User createNewUser(User u, Id portalId, Auth.UserData data){
@@ -100,9 +105,9 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             u.email = email;
         }
 
-        // TODO: Check for email_verified and bail out otherwise using RegHandlerException
-        // Already checking for email_verified in canCreateUser(Auth.UserData data).
+        // We are already checking for email_verified in canCreateUser(Auth.UserData data).
         // If already a user and calling update is there a need to stop the login?
+        // Probably there is as we don't want to link authentiq id with an unverified email?
 
         // Get first name
         if (data.attributeMap.containsKey('given_name')) {
@@ -132,7 +137,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             if (availableUsername(email)) {
                 u.username  = email;
             } else {
-          		throw new RegHandlerException('Can\'t create a user. There is already an account with this username.');
+                throw new RegHandlerException('Can\'t create a user. There is already an account with this username.');
             }
         }
 
@@ -181,10 +186,20 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     }
 
     // Decide if we can create a user from the data provided
+    // Specifically we check for nullity, family_name (though we may skip that?)
+    // and email_verified truthness;
     private boolean canCreateUser(Auth.UserData data) {
         return (data != null
-                && data.attributeMap.containsKey('email')
                 && data.attributeMap.containsKey('family_name')
+                && data.attributeMap.containsKey('email_verified')
+                && data.attributeMap.get('email_verified') == 'true');
+    }
+
+    // Decide if we can update a user from the data provided
+    // Specifically we check for nullity
+    // and email_verified truthness.
+    private boolean canUpdateUser(Auth.UserData data) {
+        return (data != null
                 && data.attributeMap.containsKey('email_verified')
                 && data.attributeMap.get('email_verified') == 'true');
     }
