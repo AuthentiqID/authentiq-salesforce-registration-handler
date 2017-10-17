@@ -27,7 +27,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
 
         User u;
 
-        List<User> userList = getMatchingUser(data);
+        List<User> userList = getMatchingUsers(data);
 
         // If the account exists just return the existing user
         // otherwise we create a new user or fail with a nice message
@@ -213,7 +213,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
 
     // Try to get at least one matching, existing and active user for account the linking case
     // or for the usage in a new computer / new browser. In the second case, this should trigger a verification email or sms to the user.
-    private List<User> getMatchingUser(Auth.UserData data) {
+    private List<User> getMatchingUsers(Auth.UserData data) {
         List<ThirdPartyAccountLink> matchedAccounts = [SELECT userid, remoteidentifier FROM ThirdPartyAccountLink where RemoteIdentifier =: data.identifier];
 
         // Normally we should get only one entry in the accountsList.
