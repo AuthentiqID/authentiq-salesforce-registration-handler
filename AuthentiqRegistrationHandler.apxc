@@ -214,7 +214,14 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
     // Try to get at least one matching, existing and active user for account the linking case
     // or for the usage in a new computer / new browser. In the second case, this should trigger a verification email or sms to the user.
     private List<User> getMatchingUsers(Auth.UserData data) {
-        List<ThirdPartyAccountLink> matchedAccounts = [SELECT userid, remoteidentifier FROM ThirdPartyAccountLink where RemoteIdentifier =: data.identifier];
+
+        // This is the Subject ID. In this case we have a public type and not a pairwise one.
+        // Find more about public and pairwise Subject ids here.
+        // http://openid.net/specs/openid-connect-core-1_0.html#SubjectIDTypes
+        // We could also do data.identifier.
+        String sub = data.attributeMap.get('sub');
+
+        List<ThirdPartyAccountLink> matchedAccounts = [SELECT userId, remoteIdentifier FROM ThirdPartyAccountLink where RemoteIdentifier =: sub];
 
         // Normally we should get only one entry in the accountsList.
 
