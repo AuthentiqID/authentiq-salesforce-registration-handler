@@ -169,8 +169,9 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
 
         // Get locale
         if (data.attributeMap.containsKey('locale')) {
-            u.localeSidKey = data.attributeMap.get('locale');
-            u.languageLocaleKey = data.attributeMap.get('locale');
+            String locale = data.attributeMap.get('locale').replace('-','_');
+            u.localeSidKey = locale;
+            u.languageLocaleKey = locale;
         } else {
             u.localeSidKey = UserInfo.getLocale();
             u.languageLocaleKey = UserInfo.getLocale();
