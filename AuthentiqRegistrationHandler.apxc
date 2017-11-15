@@ -239,13 +239,13 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
                         FROM User
                         WHERE id =: matchedAccounts.get(0).userId
                         AND email =: data.email
-                        AND userType <>: 'guest'
+                        AND userType <>: 'Guest'
                         AND isActive = true];
         } else {
             userList = [SELECT id
                         FROM User
                         WHERE email =: data.email
-                        AND userType <>: 'guest'
+                        AND userType <>: 'Guest'
                         AND isActive = true];
         }
         
