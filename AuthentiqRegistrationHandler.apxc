@@ -73,7 +73,7 @@ global class AuthentiqRegistrationHandler implements Auth.RegistrationHandler {
             } else {
                 a = accounts[0];
             }
-
+            
             // For a community user, we also need an contact
             Contact c = new Contact();
             c.accountId = a.Id;
